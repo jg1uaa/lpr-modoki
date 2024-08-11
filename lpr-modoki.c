@@ -16,6 +16,7 @@ static int job = -1;
 static char *queue = NULL;
 static char *file = NULL;
 static int debug = 0;
+static int linger = 0;
 
 #define BUFSIZE 1024
 static unsigned char buf[BUFSIZE];
@@ -207,7 +208,7 @@ static int do_main(char *ipstr)
 	int fd, en = 1, rv = -1;
 	struct sockaddr_in saddr, daddr;
 	struct linger l = {	/* avoid TCP/IP TIME_WAIT */
-		.l_onoff = 1,
+		.l_onoff = linger,
 		.l_linger = 0,
 	};
 
@@ -258,7 +259,7 @@ int main(int argc, char *argv[])
 	char *ipstr = NULL;
 	char *appname = argv[0];
 
-	while ((ch = getopt(argc, argv, "p:P:a:q:f:j:dh")) != -1) {
+	while ((ch = getopt(argc, argv, "p:P:a:q:f:j:dRh")) != -1) {
 		switch (ch) {
 		case 'p':
 			dport = atoi(optarg);
@@ -280,6 +281,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'd':
 			debug = 1;
+			break;
+		case 'R':
+			linger = 1;
 			break;
 		case 'h':
 		default:
