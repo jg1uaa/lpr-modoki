@@ -17,6 +17,7 @@ static char *queue = NULL;
 static char *file = NULL;
 static int debug = 0;
 static int linger = 0;
+static int stream = 0;
 
 #define BUFSIZE 1024
 static unsigned char buf[BUFSIZE];
@@ -78,7 +79,8 @@ static int send_subcommand2(int d, char *host, int job)
 	n += sprintf(ctrl + n, "P%"HOST_FMT"\x0a", getlogin());
 	n += sprintf(ctrl + n, "ldfA%03d%"JOB_FMT"\x0a", job, host);
 	n += sprintf(ctrl + n, "UdfA%03d%"JOB_FMT"\x0a", job, host);
-	n += sprintf(ctrl + n, "N%"FILE_FMT"\x0a", file);
+	n += sprintf(ctrl + n, "N%"FILE_FMT"\x0a",
+		     (file != NULL) ? file : "stdin");
 
 	sprintf(buf, "\x02%d cfA%03d%"JOB_FMT"\x0a", n, job, host);
 	if (debug) {
@@ -115,22 +117,26 @@ fin0:
 
 static int send_subcommand3(int d, char *host, int job)
 {
-	int size, rv = -1;
+	int len, size = 0, rv = -1;
 	unsigned int pos, remain;
 	FILE *fp;
 
-	if ((fp = fopen(file, "r")) == NULL) {
+	fp = (file != NULL) ? fopen(file, "r") : stdin;
+	if (fp == NULL) {
 		fprintf(stderr, "send_subcommand3: fopen\n");
 		goto fin0;
 	}
 
-	/* max 2Gbytes */
-	fseek(fp, 0, SEEK_END);
-	if ((size = ftell(fp)) <= 0) {
-		fprintf(stderr, "send_subcommand3: unsupported file size\n");
-		goto fin1;
+	if (!stream) {
+		/* max 2Gbytes */
+		fseek(fp, 0, SEEK_END);
+		if ((size = ftell(fp)) <= 0) {
+			fprintf(stderr,
+				"send_subcommand3: unsupported file size\n");
+			goto fin1;
+		}
+		rewind(fp);
 	}
-	rewind(fp);
 
 	sprintf(buf, "\x03%d dfA%03d%"JOB_FMT"\x0a", size, job, host);
 	fprintf(stderr, "send %d bytes, %s", size, strchr(buf, 'A') + 1);
@@ -147,15 +153,19 @@ static int send_subcommand3(int d, char *host, int job)
 		goto fin1;
 	}
 
-	for (pos = 0; pos < size; pos += BUFSIZE) {
-		remain = size - pos;
+	for (pos = 0; stream || pos < size; pos += len) {
+		remain = stream ? BUFSIZE : (size - pos);
 		if (remain > BUFSIZE) remain = BUFSIZE;
 
-		if (fread(buf, remain, 1, fp) < 1) {
-			fprintf(stderr, "send_subcommand3: fread\n");
-			goto fin1;
+		if ((len = fread(buf, 1, remain, fp)) < 1) {
+			if (feof(fp)) {
+				break;
+			} else {
+				fprintf(stderr, "send_subcommand3: fread\n");
+				goto fin1;
+			}
 		}
-		if (write(d, buf, remain) < remain) {
+		if (write(d, buf, len) < len) {
 			fprintf(stderr, "send_subcommand3: write (data)\n");
 			goto fin1;
 		}
@@ -164,13 +174,15 @@ static int send_subcommand3(int d, char *host, int job)
 	}
 	if (debug)
 		fputc('\n', stderr);
-	if (send_byte(d, 0)) {
-		fprintf(stderr, "send_subcommand3: send_byte (0)\n");
-		goto fin1;
-	}
-	if (recv_response(d)) {
-		fprintf(stderr, "send_subcommand3: recv NAK (data)\n");
-		goto fin1;
+	if (!stream) {
+		if (send_byte(d, 0)) {
+			fprintf(stderr, "send_subcommand3: send_byte (0)\n");
+			goto fin1;
+		}
+		if (recv_response(d)) {
+			fprintf(stderr, "send_subcommand3: recv NAK (data)\n");
+			goto fin1;
+		}
 	}
 
 	rv = 0;
@@ -259,7 +271,7 @@ int main(int argc, char *argv[])
 	char *ipstr = NULL;
 	char *appname = argv[0];
 
-	while ((ch = getopt(argc, argv, "p:P:a:q:f:j:dRh")) != -1) {
+	while ((ch = getopt(argc, argv, "p:P:a:q:f:j:dRsh")) != -1) {
 		switch (ch) {
 		case 'p':
 			dport = atoi(optarg);
@@ -285,6 +297,9 @@ int main(int argc, char *argv[])
 		case 'R':
 			linger = 1;
 			break;
+		case 's':
+			stream = 1;
+			break;
 		case 'h':
 		default:
 			help = 1;
@@ -292,7 +307,8 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (help || ipstr == NULL || queue == NULL || file == NULL) {
+	if (help || ipstr == NULL || queue == NULL ||
+	    (!stream && file == NULL)) {
 		fprintf(stderr, "usage: %s -a [ip address(dest)] "
 			"-q [queue] -f [filename]\n", appname);
 		return -1;
