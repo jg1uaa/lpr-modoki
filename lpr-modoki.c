@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <netdb.h>
 
 extern char *optarg;
 
@@ -215,6 +216,22 @@ fin0:
 	return rv;
 }
 
+static int get_inet_addr(in_addr_t *addr, char *hostname)
+{
+	int rv = -1;
+	struct hostent *h;
+	struct in_addr *a;
+
+	if ((h = gethostbyname(hostname)) == NULL || h->h_addrtype != AF_INET ||
+	    (a = (struct in_addr *)h->h_addr) == NULL)
+		goto fin0;
+
+	*addr = a->s_addr;
+	rv = 0;
+fin0:
+	return rv;
+}
+
 static int do_main(char *ipstr)
 {
 	int fd, en = 1, rv = -1;
@@ -249,7 +266,10 @@ static int do_main(char *ipstr)
 	/* connect to server */
 	memset(&daddr, 0, sizeof(daddr));
 	daddr.sin_family = AF_INET;
-	daddr.sin_addr.s_addr = inet_addr(ipstr);
+	if (get_inet_addr(&daddr.sin_addr.s_addr, ipstr)) {
+		fprintf(stderr, "do_main: get_inet_addr\n");
+		goto fin1;
+	}
 	daddr.sin_port = htons(dport);
 
 	if (connect(fd, (struct sockaddr *)&daddr, sizeof(daddr)) < 0) {
@@ -258,7 +278,6 @@ static int do_main(char *ipstr)
 	}
 
 	rv = do_transfer(fd);
-
 fin1:
 	close(fd);
 fin0:
@@ -268,7 +287,7 @@ fin0:
 int main(int argc, char *argv[])
 {
 	int ch, help = 0;
-	char *ipstr = NULL;
+	char *ipstr = "localhost";
 	char *appname = argv[0];
 
 	while ((ch = getopt(argc, argv, "p:P:a:q:f:j:dRsh")) != -1) {
@@ -307,11 +326,11 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	if (help || ipstr == NULL || queue == NULL ||
-	    (!stream && file == NULL)) {
-		fprintf(stderr, "usage: %s -a [ip address(dest)] "
+	if (help || queue == NULL || (!stream && file == NULL)) {
+		fprintf(stderr, "usage: %s -a [hostname(dest)] "
 			"-q [queue] -f [filename]\n", appname);
 		return -1;
 	}
+
 	return do_main(ipstr);
 }
