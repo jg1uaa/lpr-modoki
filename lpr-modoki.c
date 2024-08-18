@@ -21,7 +21,7 @@ static int linger = 0;
 static int stream = 0;
 
 #define BUFSIZE 1024
-static unsigned char buf[BUFSIZE];
+static char buf[BUFSIZE];
 
 #define HOST_FMT	".31s"
 #define JOB_FMT		".15s"
